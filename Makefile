@@ -21,6 +21,7 @@ modules/metajit.cpp/jitir_llvmapi.hpp: modules/metajit.cpp/jitir.py modules/meta
 
 bin/uxn.ll: src/uxn.c src/uxn.h
 	clang -O2 -S -emit-llvm -o $@ $<
+	opt -S --passes=lower-switch $@ -o $@
 
 clean:
 	-rm -rf bin/*

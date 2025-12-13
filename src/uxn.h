@@ -39,4 +39,4 @@ typedef struct Uxn {
 extern Uint8 emu_dei(Uxn* uxn, Uint8 addr);
 extern void emu_deo(Uxn* uxn, Uint8 addr, Uint8 value);
 
-int uxn_eval(Uxn* uxn);
+void uxn_eval(Uxn* uxn);

@@ -42,54 +42,52 @@ WITH REGARD TO THIS SOFTWARE.
 #define PEK(i,o,m) o[0] = uxn->ram[i]; if(_2) o[1] = uxn->ram[(i + 1) & m]; PUT(o)
 #define POK(i,j,m) uxn->ram[i] = j[0]; if(_2) uxn->ram[(i + 1) & m] = j[1];
 
-int
+void
 uxn_eval(Uxn* uxn)
 {
 	Uint16 pc = uxn->pc;
 	unsigned int a, b, c, x[2], y[2], z[2], step;
-	if(!pc || uxn->dev[0x0f]) return 0;
-	for(step = STEP_MAX; step; step--) {
-		switch(uxn->ram[pc++]) {
-		/* BRK */ case 0x00: return 1;
-		/* JCI */ case 0x20: if(DEC(wst)) { JMI break; } pc += 2; break;
-		/* JMI */ case 0x40: JMI break;
-		/* JSI */ case 0x60: c = pc + 2; INC(rst) = c >> 8; INC(rst) = c; JMI break;
-		/* LI2 */ case 0xa0: INC(wst) = uxn->ram[pc++]; /* fall-through */
-		/* LIT */ case 0x80: INC(wst) = uxn->ram[pc++]; break;
-		/* L2r */ case 0xe0: INC(rst) = uxn->ram[pc++]; /* fall-through */
-		/* LIr */ case 0xc0: INC(rst) = uxn->ram[pc++]; break;
-		/* INC */ OPC(0x01,POx(a),PUx(a + 1))
-		/* POP */ OPC(0x02,REM   ,{})
-		/* NIP */ OPC(0x03,GET(x) REM   ,PUT(x))
-		/* SWP */ OPC(0x04,GET(x) GET(y),PUT(x) PUT(y))
-		/* ROT */ OPC(0x05,GET(x) GET(y) GET(z),PUT(y) PUT(x) PUT(z))
-		/* DUP */ OPC(0x06,GET(x),PUT(x) PUT(x))
-		/* OVR */ OPC(0x07,GET(x) GET(y),PUT(y) PUT(x) PUT(y))
-		/* EQU */ OPC(0x08,POx(a) POx(b),PU1(b == a))
-		/* NEQ */ OPC(0x09,POx(a) POx(b),PU1(b != a))
-		/* GTH */ OPC(0x0a,POx(a) POx(b),PU1(b > a))
-		/* LTH */ OPC(0x0b,POx(a) POx(b),PU1(b < a))
-		/* JMP */ OPC(0x0c,POx(a),JMP(a))
-		/* JCN */ OPC(0x0d,POx(a) PO1(b),if(b) JMP(a))
-		/* JSR */ OPC(0x0e,POx(a),RP1(pc >> 8) RP1(pc) JMP(a))
-		/* STH */ OPC(0x0f,GET(x),RP1(x[0]) if(_2) RP1(x[1]))
-		/* LDZ */ OPC(0x10,PO1(a),PEK(a, x, 0xff))
-		/* STZ */ OPC(0x11,PO1(a) GET(y),POK(a, y, 0xff))
-		/* LDR */ OPC(0x12,PO1(a),PEK(pc + (Sint8)a, x, 0xffff))
-		/* STR */ OPC(0x13,PO1(a) GET(y),POK(pc + (Sint8)a, y, 0xffff))
-		/* LDA */ OPC(0x14,PO2(a),PEK(a, x, 0xffff))
-		/* STA */ OPC(0x15,PO2(a) GET(y),POK(a, y, 0xffff))
-		/* DEI */ OPC(0x16,PO1(a),DEI(a, x))
-		/* DEO */ OPC(0x17,PO1(a) GET(y),DEO(a, y))
-		/* ADD */ OPC(0x18,POx(a) POx(b),PUx(b + a))
-		/* SUB */ OPC(0x19,POx(a) POx(b),PUx(b - a))
-		/* MUL */ OPC(0x1a,POx(a) POx(b),PUx(b * a))
-		/* DIV */ OPC(0x1b,POx(a) POx(b),PUx(a ? b / a : 0))
-		/* AND */ OPC(0x1c,POx(a) POx(b),PUx(b & a))
-		/* ORA */ OPC(0x1d,POx(a) POx(b),PUx(b | a))
-		/* EOR */ OPC(0x1e,POx(a) POx(b),PUx(b ^ a))
-		/* SFT */ OPC(0x1f,PO1(a) POx(b),PUx(b >> (a & 0xf) << (a >> 4)))
-		}
+	if(!pc || uxn->dev[0x0f]) return;
+	switch(uxn->ram[pc++]) {
+	/* BRK */ case 0x00: return;
+	/* JCI */ case 0x20: if(DEC(wst)) { JMI break; } pc += 2; break;
+	/* JMI */ case 0x40: JMI break;
+	/* JSI */ case 0x60: c = pc + 2; INC(rst) = c >> 8; INC(rst) = c; JMI break;
+	/* LI2 */ case 0xa0: INC(wst) = uxn->ram[pc++]; /* fall-through */
+	/* LIT */ case 0x80: INC(wst) = uxn->ram[pc++]; break;
+	/* L2r */ case 0xe0: INC(rst) = uxn->ram[pc++]; /* fall-through */
+	/* LIr */ case 0xc0: INC(rst) = uxn->ram[pc++]; break;
+	/* INC */ OPC(0x01,POx(a),PUx(a + 1))
+	/* POP */ OPC(0x02,REM   ,{})
+	/* NIP */ OPC(0x03,GET(x) REM   ,PUT(x))
+	/* SWP */ OPC(0x04,GET(x) GET(y),PUT(x) PUT(y))
+	/* ROT */ OPC(0x05,GET(x) GET(y) GET(z),PUT(y) PUT(x) PUT(z))
+	/* DUP */ OPC(0x06,GET(x),PUT(x) PUT(x))
+	/* OVR */ OPC(0x07,GET(x) GET(y),PUT(y) PUT(x) PUT(y))
+	/* EQU */ OPC(0x08,POx(a) POx(b),PU1(b == a))
+	/* NEQ */ OPC(0x09,POx(a) POx(b),PU1(b != a))
+	/* GTH */ OPC(0x0a,POx(a) POx(b),PU1(b > a))
+	/* LTH */ OPC(0x0b,POx(a) POx(b),PU1(b < a))
+	/* JMP */ OPC(0x0c,POx(a),JMP(a))
+	/* JCN */ OPC(0x0d,POx(a) PO1(b),if(b) JMP(a))
+	/* JSR */ OPC(0x0e,POx(a),RP1(pc >> 8) RP1(pc) JMP(a))
+	/* STH */ OPC(0x0f,GET(x),RP1(x[0]) if(_2) RP1(x[1]))
+	/* LDZ */ OPC(0x10,PO1(a),PEK(a, x, 0xff))
+	/* STZ */ OPC(0x11,PO1(a) GET(y),POK(a, y, 0xff))
+	/* LDR */ OPC(0x12,PO1(a),PEK(pc + (Sint8)a, x, 0xffff))
+	/* STR */ OPC(0x13,PO1(a) GET(y),POK(pc + (Sint8)a, y, 0xffff))
+	/* LDA */ OPC(0x14,PO2(a),PEK(a, x, 0xffff))
+	/* STA */ OPC(0x15,PO2(a) GET(y),POK(a, y, 0xffff))
+	///* DEI */ OPC(0x16,PO1(a),DEI(a, x))
+	///* DEO */ OPC(0x17,PO1(a) GET(y),DEO(a, y))
+	/* ADD */ OPC(0x18,POx(a) POx(b),PUx(b + a))
+	/* SUB */ OPC(0x19,POx(a) POx(b),PUx(b - a))
+	/* MUL */ OPC(0x1a,POx(a) POx(b),PUx(b * a))
+	/* DIV */ OPC(0x1b,POx(a) POx(b),PUx(a ? b / a : 0))
+	/* AND */ OPC(0x1c,POx(a) POx(b),PUx(b & a))
+	/* ORA */ OPC(0x1d,POx(a) POx(b),PUx(b | a))
+	/* EOR */ OPC(0x1e,POx(a) POx(b),PUx(b ^ a))
+	/* SFT */ OPC(0x1f,PO1(a) POx(b),PUx(b >> (a & 0xf) << (a >> 4)))
 	}
-	return 0;
+	uxn->pc = pc;
 }

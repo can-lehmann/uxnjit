@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <iostream>
+
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/IR/LLVMContext.h"
@@ -33,8 +35,6 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  module->print(llvm::outs(), nullptr);
-
   metajit::Context context;
   metajit::Allocator allocator;
   metajit::Section* section = new metajit::Section(context, allocator);
@@ -43,6 +43,18 @@ int main(int argc, char** argv) {
   assert(function);
 
   metajit::LowerLLVM lower_llvm(function, section);
+
+  if (section->verify(std::cerr)) {
+    return 1;
+  }
+
+  metajit::DeadCodeElim::run(section);
+
+  section->write(std::cerr);
+
+  if (section->verify(std::cerr)) {
+    return 1;
+  }
 
   return 0;
 }
