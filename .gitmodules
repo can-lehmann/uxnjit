@@ -1,0 +1,6 @@
+[submodule "modules/metajit.cpp"]
+	path = modules/metajit.cpp
+	url = https://github.com/can-lehmann/metajit.cpp.git
+[submodule "modules/lwir.cpp"]
+	path = modules/lwir.cpp
+	url = https://github.com/can-lehmann/lwir.cpp.git
