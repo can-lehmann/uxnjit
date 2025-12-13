@@ -33,10 +33,10 @@ typedef struct {
 typedef struct Uxn {
 	Uint8 *ram, dev[0x100];
 	Stack wst, rst;
+	Uint16 pc;
 } Uxn;
 
-extern Uint8 emu_dei(Uint8 addr);
-extern void emu_deo( Uint8 addr, Uint8 value);
-extern Uxn uxn;
+extern Uint8 emu_dei(Uxn* uxn, Uint8 addr);
+extern void emu_deo(Uxn* uxn, Uint8 addr, Uint8 value);
 
-int uxn_eval(Uint16 pc);
+int uxn_eval(Uxn* uxn);
