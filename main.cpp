@@ -18,17 +18,27 @@
 #include "llvm/IR/Module.h"
 
 #include "modules/metajit.cpp/jitir.hpp"
+#include "modules/metajit.cpp/lowerllvm.hpp"
 
 int main() {
-  llvm::LLVMContext context;
+  llvm::LLVMContext llvm_context;
 
   llvm::SMDiagnostic error;
-  std::unique_ptr<llvm::Module> module = llvm::parseIRFile("uxn.ll", error, context);
+  std::unique_ptr<llvm::Module> module = llvm::parseIRFile("uxn.ll", error, llvm_context);
   if (!module) {
     return 1;
   }
 
   module->print(llvm::outs(), nullptr);
+
+  metajit::Context context;
+  metajit::Allocator allocator;
+  metajit::Section* section = new metajit::Section(context, allocator);
+  
+  llvm::Function* function = module->getFunction("uxn_eval");
+  assert(function);
+
+  metajit::LowerLLVM lower_llvm(function, section);
 
   return 0;
 }
