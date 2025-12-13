@@ -17,14 +17,18 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 
-#include "modules/metajit.cpp/jitir.hpp"
-#include "modules/metajit.cpp/lowerllvm.hpp"
+#include "../modules/metajit.cpp/jitir.hpp"
+#include "../modules/metajit.cpp/lowerllvm.hpp"
 
-int main() {
+int main(int argc, char** argv) {
+  if (argc != 2) {
+    return 1;
+  }
+
   llvm::LLVMContext llvm_context;
 
   llvm::SMDiagnostic error;
-  std::unique_ptr<llvm::Module> module = llvm::parseIRFile("uxn.ll", error, llvm_context);
+  std::unique_ptr<llvm::Module> module = llvm::parseIRFile(argv[1], error, llvm_context);
   if (!module) {
     return 1;
   }
