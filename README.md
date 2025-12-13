@@ -17,4 +17,4 @@ To handle this, uxnjit marks all memory locations which are assumed as constant 
 
 Apache License, Version 2.0
 
-`uxn.c` is licensed under the MIT License, see the license header in `uxn.c` for more information.
+`uxn.c` and `uxn.h` are licensed under the MIT License, see the license headers for more information.
