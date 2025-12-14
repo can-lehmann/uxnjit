@@ -2,3 +2,5 @@ bin/*
 *.png
 uxn/
 output.txt
+action_queue.svg
+action_queue.dot
