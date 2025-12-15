@@ -46,18 +46,36 @@ namespace metajit {
       virtual AliasingGroup group() const { return _group; }  
     };
 
+    class Field {
+    private:
+      size_t _offset = 0;
+      Structure* _structure = nullptr;
+      AliasingGroup _exact_group = 0;
+    public:
+      Field() {}
+      Field(size_t offset, Structure* structure, AliasingGroup exact_group):
+        _offset(offset), _structure(structure), _exact_group(exact_group) {}
+      
+      size_t offset() const { return _offset; }
+      Structure* structure() const { return _structure; }
+      AliasingGroup exact_group() const { return _exact_group; }
+      bool has_exact_group() const { return _exact_group < 0; }
+    };
+
     class Record: public Structure {
     private:
-      std::map<size_t, Structure*> _fields;
+      std::map<size_t, Field> _fields;
     public:
-      Record(AliasingGroup group, const std::map<size_t, Structure*>& fields):
-        Structure(group), _fields(fields) {}
-      
-      const std::map<size_t, Structure*>& fields() const { return _fields; }
+      Record(AliasingGroup group, const std::vector<Field>& fields):
+          Structure(group) {
+        for (const Field& field : fields) {
+          _fields[field.offset()] = field;
+        }
+      }
 
-      Structure* field(size_t offset) const {
+      const Field* field(size_t offset) const {
         if (_fields.find(offset) != _fields.end()) {
-          return _fields.at(offset);
+          return &_fields.at(offset);
         } else {
           return nullptr;
         }
@@ -76,6 +94,8 @@ namespace metajit {
 
     class StructureBuilder {
     private:
+      AliasingGroup _exact_group = -1;
+      AliasingGroup _group = 0;
       std::vector<Structure*> _structures;
 
       Structure* add(Structure* structure) {
@@ -90,12 +110,16 @@ namespace metajit {
         }
       }
 
-      Structure* array(AliasingGroup group, Structure* element = nullptr) {
-        return add(new Array(group, element));
+      Field field(size_t offset, Structure* structure) {
+        return Field(offset, structure, _exact_group--);
       }
 
-      Structure* record(AliasingGroup group, const std::map<size_t, Structure*>& fields) {
-        return add(new Record(group, fields));
+      Structure* array(Structure* element = nullptr) {
+        return add(new Array(_group++, element));
+      }
+
+      Structure* record(const std::vector<Field>& fields) {
+        return add(new Record(_group++, fields));
       }
     };
   private:
@@ -131,7 +155,15 @@ namespace metajit {
             if (dynmatch(Array, array, structure)) {
               _structs[inst] = array->element();
             } else if (dynmatch(Record, record, structure)) {
-              _structs[inst] = record->field(load->offset());
+              const Field* field = record->field(load->offset());
+              if (field) {
+                _structs[inst] = field->structure();
+                if (field->has_exact_group()) {
+                  load->set_aliasing(field->exact_group());
+                }
+              } else {
+                _structs[inst] = nullptr;
+              }
             } else {
               assert(false); // Unreachable
             }
@@ -142,6 +174,13 @@ namespace metajit {
             }
 
             store->set_aliasing(structure->group());
+
+            if (dynmatch(Record, record, structure)) {
+              const Field* field = record->field(store->offset());
+              if (field && field->has_exact_group()) {
+                store->set_aliasing(field->exact_group());
+              }
+            }
           } else if (dynmatch(AddPtrInst, add_ptr, inst)) {
             if (dynmatch(Array, array, at(add_ptr->ptr()))) {
               _structs[inst] = at(add_ptr->ptr());
@@ -204,15 +243,19 @@ int main(int argc, char** argv) {
   metajit::DeadCodeElim::run(section);
   metajit::AliasingFromStructure::run(section, [](metajit::AliasingFromStructure::StructureBuilder& builder) -> std::vector<metajit::AliasingFromStructure::Structure*> {
     return {
-      builder.record(0, {
-        {offsetof(Uxn, ram), builder.array(1)},
-        {offsetof(Uxn, dev), builder.array(2)},
-        {offsetof(Uxn, wst) + offsetof(Stack, dat), builder.array(3)},
-        {offsetof(Uxn, rst) + offsetof(Stack, dat), builder.array(4)}
+      builder.record({
+        builder.field(offsetof(Uxn, ram), builder.array()),
+        builder.field(offsetof(Uxn, dev), builder.array()),
+        builder.field(offsetof(Uxn, wst) + offsetof(Stack, dat), builder.array()),
+        builder.field(offsetof(Uxn, wst) + offsetof(Stack, ptr), nullptr),
+        builder.field(offsetof(Uxn, rst) + offsetof(Stack, dat), builder.array()),
+        builder.field(offsetof(Uxn, rst) + offsetof(Stack, ptr), nullptr),
+        builder.field(offsetof(Uxn, pc), nullptr)
       })
     };
   });
   metajit::Simplify::run(section, 5);
+  metajit::DeadStoreElim::run(section);
   metajit::CommonSubexprElim::run(section);
   metajit::DeadCodeElim::run(section);
   section->write(std::cerr);

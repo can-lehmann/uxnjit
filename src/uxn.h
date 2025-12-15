@@ -9,6 +9,8 @@ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
 WITH REGARD TO THIS SOFTWARE.
 */
 
+#include <inttypes.h>
+
 /* clang-format off */
 
 #define PEEK2(d) (*(d) << 8 | (d)[1])
@@ -20,15 +22,15 @@ WITH REGARD TO THIS SOFTWARE.
 #define PAGE_PROGRAM 0x0100
 #define PAGE_SIZE 0x10000
 
-typedef unsigned char Uint8;
-typedef signed char Sint8;
-typedef unsigned short Uint16;
-typedef signed short Sint16;
-typedef unsigned int Uint32;
+typedef uint8_t Uint8;
+typedef int8_t Sint8;
+typedef uint16_t Uint16;
+typedef int16_t Sint16;
+typedef uint32_t Uint32;
 
 typedef struct {
 	Uint8* dat;
-	Uint8 ptr;
+	uintptr_t ptr;
 } Stack;
 
 typedef struct Uxn {
