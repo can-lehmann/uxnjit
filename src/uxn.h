@@ -27,11 +27,13 @@ typedef signed short Sint16;
 typedef unsigned int Uint32;
 
 typedef struct {
-	Uint8 dat[0x100], ptr;
+	Uint8* dat;
+	Uint8 ptr;
 } Stack;
 
 typedef struct Uxn {
-	Uint8 *ram, dev[0x100];
+	Uint8 *ram;
+	Uint8 *dev;
 	Stack wst, rst;
 	Uint16 pc;
 } Uxn;

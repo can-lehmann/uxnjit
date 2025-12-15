@@ -33,6 +33,146 @@
 
 #include "uxn.h"
 
+namespace metajit {
+  class AliasingFromStructure: public Pass<AliasingFromStructure> {
+  public:
+    class Structure {
+    private:
+      AliasingGroup _group = 0;
+    public:
+      Structure(AliasingGroup group): _group(group) {}
+      virtual ~Structure() {}
+
+      virtual AliasingGroup group() const { return _group; }  
+    };
+
+    class Record: public Structure {
+    private:
+      std::map<size_t, Structure*> _fields;
+    public:
+      Record(AliasingGroup group, const std::map<size_t, Structure*>& fields):
+        Structure(group), _fields(fields) {}
+      
+      const std::map<size_t, Structure*>& fields() const { return _fields; }
+
+      Structure* field(size_t offset) const {
+        if (_fields.find(offset) != _fields.end()) {
+          return _fields.at(offset);
+        } else {
+          return nullptr;
+        }
+      }
+    };
+
+    class Array: public Structure {
+    private:
+      Structure* _element;
+    public:
+      Array(AliasingGroup group, Structure* element):
+        Structure(group), _element(element) {}
+      
+      Structure* element() const { return _element; }
+    };
+
+    class StructureBuilder {
+    private:
+      std::vector<Structure*> _structures;
+
+      Structure* add(Structure* structure) {
+        _structures.push_back(structure);
+        return structure;
+      }
+    public:
+      StructureBuilder() {}
+      ~StructureBuilder() {
+        for (Structure* structure : _structures) {
+          delete structure;
+        }
+      }
+
+      Structure* array(AliasingGroup group, Structure* element = nullptr) {
+        return add(new Array(group, element));
+      }
+
+      Structure* record(AliasingGroup group, const std::map<size_t, Structure*>& fields) {
+        return add(new Record(group, fields));
+      }
+    };
+  private:
+    bool _strict_mode = true;
+    std::vector<Structure*> _inputs;
+    InstMap<Structure*> _structs;
+
+    Structure* at(Value* value) {
+      if (value->is_inst()) {
+        return _structs[(Inst*) value];
+      } else if (dynmatch(Input, input, value)) {
+        return _inputs[input->index()];
+      } else {
+        return nullptr;
+      }
+    }
+
+    void apply(Section* section) {
+      assert(_inputs.size() == section->inputs().size());
+
+      _structs.init(section);
+
+      for (Block* block : *section) {
+        for (Inst* inst : *block) {
+          if (dynmatch(LoadInst, load, inst)) {
+            Structure* structure = at(load->ptr());
+            if (!structure) {
+              throw std::runtime_error("AliasingFromStructure: Load from unknown structure");
+            }
+
+            load->set_aliasing(structure->group());
+
+            if (dynmatch(Array, array, structure)) {
+              _structs[inst] = array->element();
+            } else if (dynmatch(Record, record, structure)) {
+              _structs[inst] = record->field(load->offset());
+            } else {
+              assert(false); // Unreachable
+            }
+          } else if (dynmatch(StoreInst, store, inst)) {
+            Structure* structure = at(store->ptr());
+            if (!structure) {
+              throw std::runtime_error("AliasingFromStructure: Store to unknown structure");
+            }
+
+            store->set_aliasing(structure->group());
+          } else if (dynmatch(AddPtrInst, add_ptr, inst)) {
+            if (dynmatch(Array, array, at(add_ptr->ptr()))) {
+              _structs[inst] = at(add_ptr->ptr());
+            }
+          } else if (dynamic_cast<AssumeConstInst*>(inst) ||
+                     dynamic_cast<FreezeInst*>(inst)) {
+            _structs[inst] = at(inst->arg(0));
+          }
+
+          if (_strict_mode && !_structs[inst] && inst->type() == Type::Ptr) {
+            std::ostringstream stream;
+            stream << "AliasingFromStructure: Unable to determine structure for instruction\n";
+            inst->write(stream);
+            throw std::runtime_error(stream.str());
+          }
+        }
+      }
+    }
+  public:
+    AliasingFromStructure(Section* section, std::vector<Structure*> inputs): Pass(section), _inputs(inputs) {
+      apply(section);
+    }
+
+    AliasingFromStructure(Section* section, std::function<std::vector<Structure*>(StructureBuilder&)> fn): Pass(section) {
+      StructureBuilder builder;
+      _inputs = fn(builder);
+      apply(section);
+    } 
+  };
+}
+
 int main(int argc, char** argv) {
   if (argc != 3) {
     return 1;
@@ -62,6 +202,16 @@ int main(int argc, char** argv) {
   }
 
   metajit::DeadCodeElim::run(section);
+  metajit::AliasingFromStructure::run(section, [](metajit::AliasingFromStructure::StructureBuilder& builder) -> std::vector<metajit::AliasingFromStructure::Structure*> {
+    return {
+      builder.record(0, {
+        {offsetof(Uxn, ram), builder.array(1)},
+        {offsetof(Uxn, dev), builder.array(2)},
+        {offsetof(Uxn, wst) + offsetof(Stack, dat), builder.array(3)},
+        {offsetof(Uxn, rst) + offsetof(Stack, dat), builder.array(4)}
+      })
+    };
+  });
   metajit::Simplify::run(section, 5);
   metajit::CommonSubexprElim::run(section);
   metajit::DeadCodeElim::run(section);
@@ -98,6 +248,9 @@ int main(int argc, char** argv) {
 
   Uxn uxn = {0};
   uxn.ram = new uint8_t[ROM_SIZE]();
+  uxn.dev = new uint8_t[0x100]();
+  uxn.rst.dat = new uint8_t[0x100]();
+  uxn.wst.dat = new uint8_t[0x100]();
   uxn.pc = 0x100;
 
   std::ifstream rom_file(argv[2], std::ios::binary);
@@ -123,8 +276,25 @@ int main(int argc, char** argv) {
       trace_builder.move_to_end(trace_builder.build_block());
 
       uint16_t start_pc = uxn.pc;
+      uint8_t return_stack_top = uxn.rst.ptr;
+      std::set<uint16_t> visited;
       for (size_t it = 0; it < 64; it++) {
+        if (uxn.rst.ptr < return_stack_top) {
+          break; // Stop tracing since, we could have returned to many different locations
+        }
+        if (visited.find(uxn.pc) != visited.end()) {
+          break;
+        }
+        visited.insert(uxn.pc);
+
+        {
+          std::ostringstream stream;
+          stream << "Step " << it << " at PC " << std::hex << uxn.pc << std::dec;
+          trace_builder.build_comment(stream.str());
+        }
+
         trace((uint8_t*) &uxn, &trace_builder);
+
         if (uxn.pc == start_pc) {
           break;
         }
@@ -135,6 +305,14 @@ int main(int argc, char** argv) {
       } else {
         trace_builder.build_jump(*trace_section->begin());
       }
+
+      if (trace_section->verify(std::cerr)) {
+        return 1;
+      }
+
+      metajit::DeadCodeElim::run(trace_section);
+      metajit::DeadStoreElim::run(trace_section);
+      metajit::DeadCodeElim::run(trace_section);
       
       trace_section->write(std::cerr);
 
@@ -144,6 +322,13 @@ int main(int argc, char** argv) {
 
       exit(0);
     } else {
+      std::cerr << "Step at PC " << std::hex << uxn.pc << " Opcode " << (uint64_t)uxn.ram[uxn.pc] << std::dec << "\n";
+      std::cerr << "  Return Stack:";
+      for (size_t i = 0; i < uxn.rst.ptr; i++) {
+        std::cerr << " " << std::hex << (uint64_t)uxn.rst.dat[i] << std::dec;
+      }
+      std::cerr << "\n";
+
       step((uint8_t*) &uxn);
     }
   }
