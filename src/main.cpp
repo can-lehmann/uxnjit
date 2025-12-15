@@ -210,6 +210,197 @@ namespace metajit {
       apply(section);
     } 
   };
+
+  class OffsetReassoc: public Pass<OffsetReassoc> {
+  private:
+    struct Sum {
+      Type type = Type::Void;
+      Value* pointer = nullptr;
+      std::set<Value*> terms;
+      uint64_t constant = 0;
+
+      Sum() {}
+      Sum(Value* value) {
+        type = value->type();
+        if (dynmatch(Const, constant_value, value)) {
+          constant = constant_value->value();
+        } else if (value->type() == Type::Ptr) {
+          pointer = value;
+        } else {
+          terms.insert(value);
+        }
+      }
+
+      Sum add(const Sum& other, Value* default_value) const {
+        Sum result = *this;
+        if (other.pointer) {
+          assert(other.type == Type::Ptr);
+          if (result.pointer) {
+            return Sum(default_value);
+          } else {
+            result.pointer = other.pointer;
+            result.type = Type::Ptr;
+          }
+        }
+        result.terms.insert(other.terms.begin(), other.terms.end());
+        result.constant += other.constant;
+
+        if (type == Type::Ptr || other.type == Type::Ptr) {
+          assert(result.type == Type::Ptr);
+        } else {
+          assert(type == other.type);
+        }
+
+        return result;
+      }
+
+      Sum with_constant(uint64_t value) const {
+        Sum result = *this;
+        result.constant = value;
+        return result;
+      }
+
+      Value* build(Builder& builder) const {
+        Value* result = nullptr;
+        Type offset_type = (type == Type::Ptr) ? Type::Int64 : type;
+
+        if (constant) {
+          result = builder.build_const(offset_type, constant);
+        }
+
+        for (Value* term : terms) {
+          if (result) {
+            result = builder.build_add(result, term);
+          } else {
+            result = term;
+          }
+        }
+
+        if (pointer) {
+          if (result) {
+            result = builder.build_add_ptr(pointer, result);
+          } else {
+            result = pointer;
+          }
+        }
+
+        if (!result) {
+          result = builder.build_const(type, 0);
+        }
+
+        assert(result->type() == type);
+        return result;
+      }
+
+      Inst* legal_location() const {
+        Inst* loc = nullptr;
+
+        #define propose(value) \
+          if (value->is_inst()) { \
+            Inst* inst = (Inst*) value; \
+            if (loc) { \
+              if (inst->name() > loc->name()) { \
+                loc = inst; \
+              } \
+            } else { \
+              loc = inst; \
+            } \
+          }
+
+        if (pointer) {
+          propose(pointer);
+        }
+        for (Value* term : terms) {
+          propose(term);
+        }
+
+        #undef propose
+        return loc;
+      }
+
+      bool operator==(const Sum& other) const {
+        return type == other.type &&
+               pointer == other.pointer &&
+               constant == other.constant &&
+               terms == other.terms;
+      }
+    };
+
+    class SumHasher {
+    public:
+      size_t operator()(const Sum& sum) const {
+        size_t hash = std::hash<uint64_t>()(sum.constant);
+        if (sum.pointer) {
+          hash ^= std::hash<Value*>()(sum.pointer);
+        }
+        for (Value* term : sum.terms) {
+          hash ^= std::hash<Value*>()(term);
+        }
+        return hash; 
+      }
+    };
+
+    Section* _section = nullptr;
+    InstMap<Sum> _sums;
+    InstMap<Block*> _inst_to_block;
+    std::unordered_map<Sum, Value*, SumHasher> _built;
+
+    Value* build(const Sum& sum) {
+      if (_built.find(sum) != _built.end()) {
+        return _built.at(sum);
+      }
+
+      Builder builder(_section);
+      if (Inst* loc = sum.legal_location()) {
+        builder.move_before(_inst_to_block[loc], loc);
+        builder.move_next();
+      } else {
+        builder.move_to_begin(_section->entry());
+      }
+
+      Value* value = sum.build(builder);
+      _built[sum] = value;
+      return value;
+    }
+  public:
+    OffsetReassoc(Section* section): Pass(section), _section(section) {
+      _sums.init(section);
+      _inst_to_block.init(section);
+
+      for (Block* block : *section) {
+        for (Inst* inst : *block) {
+          _inst_to_block[inst] = block;
+
+          if (dynmatch(LoadInst, load, inst)) {
+            Sum sum = at(load->ptr());
+            load->set_arg(0, build(sum.with_constant(0)));
+            load->set_offset(load->offset() + sum.constant);
+          } else if (dynmatch(StoreInst, store, inst)) {
+            Sum sum = at(store->ptr());
+            store->set_arg(0, build(sum.with_constant(0)));
+            store->set_offset(store->offset() + sum.constant);
+          }
+
+          if (dynamic_cast<AddInst*>(inst) || dynamic_cast<AddPtrInst*>(inst)) {
+            Sum a = at(inst->arg(0));
+            Sum b = at(inst->arg(1));
+            _sums[inst] = a.add(b, inst);
+          } else {
+            _sums[inst] = Sum(inst);
+          }
+        }
+      }
+    }
+
+    Sum at(Value* value) {
+      if (value->is_inst()) {
+        return _sums[(Inst*) value];
+      } else {
+        return Sum(value);
+      }
+    }
+  };
+
 }
 
 int main(int argc, char** argv) {
@@ -255,6 +446,7 @@ int main(int argc, char** argv) {
     };
   });
   metajit::Simplify::run(section, 5);
+  metajit::OffsetReassoc::run(section);
   metajit::DeadStoreElim::run(section);
   metajit::CommonSubexprElim::run(section);
   metajit::DeadCodeElim::run(section);
