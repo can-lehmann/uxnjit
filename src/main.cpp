@@ -401,6 +401,34 @@ namespace metajit {
     }
   };
 
+  class ExactStoreLoadForwarder: public Pass<ExactStoreLoadForwarder> {
+  private:
+  public:
+    ExactStoreLoadForwarder(Section* section): Pass(section) {
+      InstMap<Value*> substs(section);
+      for (Block* block : *section) {
+        ExpandingVector<Value*> last_stores;
+
+        for (Inst* inst : *block) {
+          inst->substitute_args(substs);
+
+          if (dynmatch(StoreInst, store, inst)) {
+            if (store->aliasing() < 0) {
+              last_stores[-store->aliasing()] = store->value();
+            }
+          } else if (dynmatch(LoadInst, load, inst)) {
+            if (load->aliasing() < 0) {
+              Value* stored_value = last_stores[-load->aliasing()];
+              if (stored_value) {
+                substs[inst] = stored_value;
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
 }
 
 int main(int argc, char** argv) {
@@ -446,6 +474,7 @@ int main(int argc, char** argv) {
     };
   });
   metajit::Simplify::run(section, 5);
+  metajit::ExactStoreLoadForwarder::run(section);
   metajit::OffsetReassoc::run(section);
   metajit::DeadStoreElim::run(section);
   metajit::CommonSubexprElim::run(section);
