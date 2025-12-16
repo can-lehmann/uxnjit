@@ -16,10 +16,10 @@ WITH REGARD TO THIS SOFTWARE.
 	case 0x20|opc: __metajit_comment(name "2"); {const int _2=1,_r=0;init body;} break;\
 	case 0x40|opc: __metajit_comment(name "r"); {const int _2=0,_r=1;init body;} break;\
 	case 0x60|opc: __metajit_comment(name "2r"); {const int _2=1,_r=1;init body;} break;\
-	case 0x80|opc: __metajit_comment(name "k"); {const int _2=0,_r=0,k=uxn->wst.ptr;init uxn->wst.ptr=k;body;} break;\
-	case 0xa0|opc: __metajit_comment(name "2k"); {const int _2=1,_r=0,k=uxn->wst.ptr;init uxn->wst.ptr=k;body;} break;\
-	case 0xc0|opc: __metajit_comment(name "kr"); {const int _2=0,_r=1,k=uxn->rst.ptr;init uxn->rst.ptr=k;body;} break;\
-	case 0xe0|opc: __metajit_comment(name "2kr"); {const int _2=1,_r=1,k=uxn->rst.ptr;init uxn->rst.ptr=k;body;} break;\
+	case 0x80|opc: __metajit_comment(name "k"); {const int _2=0,_r=0; Uint8* k=uxn->wst.ptr;init uxn->wst.ptr=k;body;} break;\
+	case 0xa0|opc: __metajit_comment(name "2k"); {const int _2=1,_r=0; Uint8* k=uxn->wst.ptr;init uxn->wst.ptr=k;body;} break;\
+	case 0xc0|opc: __metajit_comment(name "kr"); {const int _2=0,_r=1; Uint8* k=uxn->rst.ptr;init uxn->rst.ptr=k;body;} break;\
+	case 0xe0|opc: __metajit_comment(name "2kr"); {const int _2=1,_r=1; Uint8* k=uxn->rst.ptr;init uxn->rst.ptr=k;body;} break;\
 }
 
 /* Microcode */
@@ -32,8 +32,8 @@ void emu_deo(Uxn* uxn, Uint8 addr, Uint8 value) {}
 
 #define JMI a = uxn->ram[pc] << 8 | uxn->ram[pc + 1], pc += a + 2;
 #define REM if(_r) uxn->rst.ptr -= 1 + _2; else uxn->wst.ptr -= 1 + _2;
-#define INC(s) uxn->s.dat[uxn->s.ptr++]
-#define DEC(s) uxn->s.dat[--uxn->s.ptr]
+#define INC(s) *(uxn->s.ptr++)
+#define DEC(s) *(--uxn->s.ptr)
 #define JMP(x) { if(_2) pc = x; else pc += (Sint8)x; }
 #define PO1(o) { o = _r ? DEC(rst) : DEC(wst);}
 #define PO2(o) { if(_r) o = DEC(rst), o |= DEC(rst) << 8; else o = DEC(wst), o |= DEC(wst) << 8; }

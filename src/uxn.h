@@ -30,7 +30,7 @@ typedef uint32_t Uint32;
 
 typedef struct {
 	Uint8* dat;
-	uintptr_t ptr;
+	Uint8* ptr;
 } Stack;
 
 typedef struct Uxn {

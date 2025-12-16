@@ -30,6 +30,7 @@
 #include "../modules/metajit.cpp/jitir.hpp"
 #include "../modules/metajit.cpp/lowerllvm.hpp"
 #include "../modules/metajit.cpp/llvmgen.hpp"
+#include "../modules/metajit.cpp/x86gen.hpp"
 
 #include "uxn.h"
 
@@ -431,13 +432,17 @@ namespace metajit {
 
 }
 
+__attribute__((noinline))
+void debug() {
+  __asm__ volatile("");
+}
+
 int main(int argc, char** argv) {
   if (argc != 3) {
     return 1;
   }
 
-  llvm::InitializeNativeTarget();
-  llvm::InitializeNativeTargetAsmPrinter();
+  metajit::LLVMCodeGen::initilize_llvm_jit();
 
   llvm::LLVMContext llvm_context;
 
@@ -461,21 +466,23 @@ int main(int argc, char** argv) {
 
   metajit::DeadCodeElim::run(section);
   metajit::AliasingFromStructure::run(section, [](metajit::AliasingFromStructure::StructureBuilder& builder) -> std::vector<metajit::AliasingFromStructure::Structure*> {
+    auto* wst = builder.array();
+    auto* rst = builder.array();
+    
     return {
       builder.record({
         builder.field(offsetof(Uxn, ram), builder.array()),
         builder.field(offsetof(Uxn, dev), builder.array()),
-        builder.field(offsetof(Uxn, wst) + offsetof(Stack, dat), builder.array()),
-        builder.field(offsetof(Uxn, wst) + offsetof(Stack, ptr), nullptr),
-        builder.field(offsetof(Uxn, rst) + offsetof(Stack, dat), builder.array()),
-        builder.field(offsetof(Uxn, rst) + offsetof(Stack, ptr), nullptr),
+        builder.field(offsetof(Uxn, wst) + offsetof(Stack, dat), wst),
+        builder.field(offsetof(Uxn, wst) + offsetof(Stack, ptr), wst),
+        builder.field(offsetof(Uxn, rst) + offsetof(Stack, dat), rst),
+        builder.field(offsetof(Uxn, rst) + offsetof(Stack, ptr), rst),
         builder.field(offsetof(Uxn, pc), nullptr)
       })
     };
   });
   metajit::Simplify::run(section, 5);
   metajit::ExactStoreLoadForwarder::run(section);
-  metajit::OffsetReassoc::run(section);
   metajit::DeadStoreElim::run(section);
   metajit::CommonSubexprElim::run(section);
   metajit::DeadCodeElim::run(section);
@@ -502,6 +509,7 @@ int main(int argc, char** argv) {
 
   using StepFn = void(*)(uint8_t*);
   using TraceFn = void(*)(uint8_t*, metajit::TraceBuilder*);
+  using CompiledTraceFn = void(* [[clang::preserve_none]])(uint8_t*);;
   StepFn step = ExitOnErr(jit->lookup("step")).toPtr<StepFn>();
   TraceFn trace = ExitOnErr(jit->lookup("trace")).toPtr<TraceFn>();
 
@@ -514,7 +522,9 @@ int main(int argc, char** argv) {
   uxn.ram = new uint8_t[ROM_SIZE]();
   uxn.dev = new uint8_t[0x100]();
   uxn.rst.dat = new uint8_t[0x100]();
+  uxn.rst.ptr = uxn.rst.dat;
   uxn.wst.dat = new uint8_t[0x100]();
+  uxn.wst.ptr = uxn.wst.dat;
   uxn.pc = 0x100;
 
   std::ifstream rom_file(argv[2], std::ios::binary);
@@ -527,11 +537,17 @@ int main(int argc, char** argv) {
   }
   rom_file.read((char*) &uxn.ram[0x100], size); 
 
+  CompiledTraceFn* traces = new CompiledTraceFn[ROM_SIZE]();
+
   metajit::Allocator trace_allocator;
   
   while (uxn.pc) {
     counts[uxn.pc]++;
-    if (counts[uxn.pc] > 5) {
+    if (traces[uxn.pc]) {
+      std::cerr << "Executing trace at PC " << std::hex << uxn.pc << std::dec << "\n";
+      debug();
+      traces[uxn.pc]((uint8_t*) &uxn);
+    } else if (counts[uxn.pc] > 5) {
       std::cerr << "Tracing at PC " << std::hex << uxn.pc << std::dec << "\n";
       metajit::Section* trace_section = new metajit::Section(context, trace_allocator);
       metajit::TraceBuilder trace_builder(trace_section);
@@ -540,7 +556,7 @@ int main(int argc, char** argv) {
       trace_builder.move_to_end(trace_builder.build_block());
 
       uint16_t start_pc = uxn.pc;
-      uint8_t return_stack_top = uxn.rst.ptr;
+      uint8_t* return_stack_top = uxn.rst.ptr;
       std::set<uint16_t> visited;
       for (size_t it = 0; it < 64; it++) {
         if (uxn.rst.ptr < return_stack_top) {
@@ -584,12 +600,21 @@ int main(int argc, char** argv) {
         return 1;
       }
 
-      exit(0);
+      metajit::X86CodeGen codegen(trace_section, {metajit::Reg::phys(12)});
+      
+      {
+        codegen.write(std::cerr);
+        std::ostringstream stream;
+        stream << "trace_" << std::hex << start_pc << std::dec << ".bin";
+        codegen.save(stream.str());
+      }
+      
+      traces[start_pc] = (CompiledTraceFn) codegen.deploy();
     } else {
       std::cerr << "Step at PC " << std::hex << uxn.pc << " Opcode " << (uint64_t)uxn.ram[uxn.pc] << std::dec << "\n";
       std::cerr << "  Return Stack:";
-      for (size_t i = 0; i < uxn.rst.ptr; i++) {
-        std::cerr << " " << std::hex << (uint64_t)uxn.rst.dat[i] << std::dec;
+      for (uint8_t* ptr = uxn.rst.dat; ptr < uxn.rst.ptr; ptr++) {
+        std::cerr << " " << std::hex << (uint64_t)*ptr << std::dec;
       }
       std::cerr << "\n";
 
