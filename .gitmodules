@@ -4,3 +4,6 @@
 [submodule "modules/lwir.cpp"]
 	path = modules/lwir.cpp
 	url = https://github.com/can-lehmann/lwir.cpp.git
+[submodule "modules/unittest.cpp"]
+	path = modules/unittest.cpp
+	url = https://github.com/can-lehmann/unittest.cpp.git
