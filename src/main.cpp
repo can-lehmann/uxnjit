@@ -484,8 +484,8 @@ int main(int argc, char** argv) {
   metajit::Simplify::run(section, 5);
   metajit::ExactStoreLoadForwarder::run(section);
   metajit::DeadStoreElim::run(section);
-  metajit::CommonSubexprElim::run(section);
-  metajit::DeadCodeElim::run(section);
+  //metajit::CommonSubexprElim::run(section);
+  //metajit::DeadCodeElim::run(section);
   section->write(std::cerr);
 
   if (section->verify(std::cerr)) {
@@ -517,13 +517,14 @@ int main(int argc, char** argv) {
 
   uint8_t* counts = new uint8_t[ROM_SIZE]();
 
+  constexpr size_t PADDING = 16;
 
   Uxn uxn = {0};
   uxn.ram = new uint8_t[ROM_SIZE]();
   uxn.dev = new uint8_t[0x100]();
-  uxn.rst.dat = new uint8_t[0x100]();
+  uxn.rst.dat = new uint8_t[0x100 + PADDING]();
   uxn.rst.ptr = uxn.rst.dat;
-  uxn.wst.dat = new uint8_t[0x100]();
+  uxn.wst.dat = new uint8_t[0x100 + PADDING]();
   uxn.wst.ptr = uxn.wst.dat;
   uxn.pc = 0x100;
 
@@ -591,6 +592,7 @@ int main(int argc, char** argv) {
       }
 
       metajit::DeadCodeElim::run(trace_section);
+      metajit::RefineAliasing::run(trace_section);
       metajit::DeadStoreElim::run(trace_section);
       metajit::DeadCodeElim::run(trace_section);
       
@@ -612,14 +614,40 @@ int main(int argc, char** argv) {
       traces[start_pc] = (CompiledTraceFn) codegen.deploy();
     } else {
       std::cerr << "Step at PC " << std::hex << uxn.pc << " Opcode " << (uint64_t)uxn.ram[uxn.pc] << std::dec << "\n";
-      std::cerr << "  Return Stack:";
-      for (uint8_t* ptr = uxn.rst.dat; ptr < uxn.rst.ptr; ptr++) {
-        std::cerr << " " << std::hex << (uint64_t)*ptr << std::dec;
-      }
-      std::cerr << "\n";
 
       step((uint8_t*) &uxn);
     }
+
+    if (uxn.wst.ptr > uxn.wst.dat + 0x100) {
+      std::cerr << "Working stack overflow\n";
+      return 1;
+    }
+
+    if (uxn.wst.ptr < uxn.wst.dat) {
+      std::cerr << "Working stack underflow\n";
+      return 1;
+    }
+
+    if (uxn.rst.ptr > uxn.rst.dat + 0x100) {
+      std::cerr << "Return stack overflow\n";
+      return 1;
+    }
+
+    if (uxn.rst.ptr < uxn.rst.dat) {
+      std::cerr << "Return stack underflow\n";
+      return 1;
+    }
+
+    std::cerr << "  Working Stack:";
+    for (uint8_t* ptr = uxn.wst.dat; ptr < uxn.wst.ptr; ptr++) {
+      std::cerr << " " << std::hex << (uint64_t)*ptr << std::dec;
+    }
+    std::cerr << "\n";
+    std::cerr << "  Return Stack:";
+    for (uint8_t* ptr = uxn.rst.dat; ptr < uxn.rst.ptr; ptr++) {
+      std::cerr << " " << std::hex << (uint64_t)*ptr << std::dec;
+    }
+    std::cerr << "\n";
   }
 
   return 0;
