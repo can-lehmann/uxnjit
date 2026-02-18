@@ -126,22 +126,23 @@ namespace metajit {
   private:
     bool _strict_mode = true;
     std::vector<Structure*> _inputs;
-    InstMap<Structure*> _structs;
+    NameMap<Structure*> _structs;
 
     Structure* at(Value* value) {
-      if (value->is_inst()) {
-        return _structs[(Inst*) value];
-      } else if (dynmatch(Input, input, value)) {
-        return _inputs[input->index()];
+      if (value->is_named()) {
+        return _structs[(NamedValue*) value];
       } else {
         return nullptr;
       }
     }
 
     void apply(Section* section) {
-      assert(_inputs.size() == section->inputs().size());
-
       _structs.init(section);
+
+      assert(_inputs.size() == section->entry()->args().size());
+      for (Arg* arg : section->entry()->args()) {
+        _structs[arg] = _inputs[arg->index()];
+      }
 
       for (Block* block : *section) {
         for (Inst* inst : *block) {
@@ -342,8 +343,8 @@ namespace metajit {
     };
 
     Section* _section = nullptr;
-    InstMap<Sum> _sums;
-    InstMap<Block*> _inst_to_block;
+    NameMap<Sum> _sums;
+    NameMap<Block*> _inst_to_block;
     std::unordered_map<Sum, Value*, SumHasher> _built;
 
     Value* build(const Sum& sum) {
@@ -406,7 +407,7 @@ namespace metajit {
   private:
   public:
     ExactStoreLoadForwarder(Section* section): Pass(section) {
-      InstMap<Value*> substs(section);
+      NameMap<Value*> substs(section);
       for (Block* block : *section) {
         ExpandingVector<Value*> last_stores;
 
@@ -553,8 +554,9 @@ int main(int argc, char** argv) {
       metajit::Section* trace_section = new metajit::Section(context, trace_allocator);
       metajit::TraceBuilder trace_builder(trace_section);
 
-      trace_builder.build_input(metajit::Type::Ptr); // Uxn*
-      trace_builder.move_to_end(trace_builder.build_block());
+      trace_builder.move_to_end(trace_builder.build_block({
+        metajit::Type::Ptr // Uxn*
+      }));
 
       uint16_t start_pc = uxn.pc;
       uint8_t* return_stack_top = uxn.rst.ptr;
